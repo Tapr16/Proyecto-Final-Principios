@@ -270,7 +270,7 @@ Como los datos son deterministas, los IDs siempre existen tras el seed. Para reg
 
 ## Decisiones de diseño
 
-- Se prueban **1, 2 y 3 nodos** (el enunciado a veces habla solo de uno y dos; conviene confirmarlo con el profesor).
+- Se prueban **1, 2 y 3 nodos** (el enunciado a veces habla solo de uno y dos; confirmado con el profesor que son 1, 2 y 3).
 
 - Todas las VMs `Standard_D2as_v5` (no serie B: sus créditos de CPU harían los resultados no comparables).
 - JMeter en una VM de la misma red, no en un portátil.
