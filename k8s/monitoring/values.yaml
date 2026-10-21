@@ -1,0 +1,37 @@
+# Valores para kube-prometheus-stack en K3s.
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     -n monitoring --create-namespace -f k8s/monitoring/values.yaml
+
+# Ahorrar recursos
+alertmanager:
+  enabled: false
+
+# K3s no expone estos componentes como pods separados: desactivar para
+# evitar targets caídos en Prometheus.
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }
+kubeEtcd: { enabled: false }
+
+prometheus:
+  prometheusSpec:
+    # Recoger ServiceMonitors de cualquier namespace (p. ej. proyecto)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    scrapeInterval: 15s
+    retention: 15d
+    nodeSelector: { rol: db }
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+
+grafana:
+  adminPassword: CAMBIAR-CLAVE
+  nodeSelector: { rol: db }
+
+prometheusOperator:
+  nodeSelector: { rol: db }
+
+kube-state-metrics:
+  nodeSelector: { rol: db }
+
+# node-exporter es un DaemonSet: debe correr en todos los nodos (sin nodeSelector).

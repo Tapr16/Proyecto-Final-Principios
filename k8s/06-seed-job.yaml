@@ -1,0 +1,29 @@
+# Resetea la BD (trunca y recarga). Correr antes de cada escenario:
+#   kubectl -n proyecto delete job seed --ignore-not-found
+#   kubectl apply -f k8s/06-seed-job.yaml
+#   kubectl -n proyecto wait --for=condition=complete job/seed --timeout=15m
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed
+  namespace: proyecto
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector: { rol: db }
+      initContainers:                    # esperar a que PostgreSQL acepte conexiones
+        - name: esperar-postgres
+          image: postgres:16
+          command: ["sh", "-c", "until pg_isready -h postgres -U app -d tienda; do sleep 2; done"]
+      containers:
+        - name: seed
+          image: ghcr.io/tapr16/pf-api:1.0
+          command: ["python", "seed.py"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: postgres-secret, key: DATABASE_URL }
+          resources:
+            limits: { memory: 2Gi }

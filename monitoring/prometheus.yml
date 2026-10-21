@@ -1,0 +1,17 @@
+# Configuración de Prometheus para la Fase 1 (Docker Compose).
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]

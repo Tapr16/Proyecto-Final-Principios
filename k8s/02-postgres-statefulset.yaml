@@ -1,0 +1,42 @@
+# PostgreSQL: una sola instancia, siempre en nodo1 (label rol=db).
+# limits = Docker (1 CPU / 2 GB). requests de CPU en 500m para que quepan
+# también las réplicas de la API y el monitoreo en un nodo de 2 vCPU.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: proyecto
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      nodeSelector: { rol: db }
+      containers:
+        - name: postgres
+          image: postgres:16
+          envFrom:
+            - secretRef: { name: postgres-secret }
+          env:
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { containerPort: 5432, name: postgres }
+          resources:
+            requests: { cpu: 500m, memory: 2Gi }
+            limits: { cpu: "1", memory: 2Gi }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "app", "-d", "tienda"] }
+            periodSeconds: 5
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path   # viene con K3s
+        resources:
+          requests: { storage: 10Gi }

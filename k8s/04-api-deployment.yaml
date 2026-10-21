@@ -1,0 +1,44 @@
+# API: el número de réplicas se cambia con
+#   kubectl -n proyecto scale deployment api --replicas=N
+# limits = Docker (1 CPU / 512 MB). requests de CPU en 250m para que las
+# 3 réplicas quepan en el escenario de 1 nodo (si no, quedarían Pending).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: proyecto
+  labels: { app: api }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      topologySpreadConstraints:          # reparte réplicas entre nodos
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: api }
+      containers:
+        - name: api
+          image: ghcr.io/tapr16/pf-api:1.0
+          ports:
+            - { containerPort: 8000, name: http }
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: postgres-secret, key: DATABASE_URL }
+            - { name: DB_POOL_SIZE, value: "10" }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+            failureThreshold: 6
