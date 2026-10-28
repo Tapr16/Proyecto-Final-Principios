@@ -69,7 +69,8 @@ Para apagar: `docker compose down` (agregar `-v` para borrar también los datos)
 ## 2. Crear la infraestructura en Google Cloud
 
 Se usa el **crédito de la prueba gratuita** (1.001.736 COP ≈ USD 300, vence a los 90 días) en el proyecto
-`pf-experimento-tapr16`, región `us-central1`.
+`pf-experimento-tapr16`, región `us-central1`, zona `us-central1-c` (en `us-central1-a` no había capacidad de
+`n2d-standard-2` el día de la creación; `gcp-create.sh` detecta la zona de nodo1).
 Elegimos Google Cloud porque Azure for Students no tenía cuota para el plan (ver [Anexo A](#anexo-a--azure-alternativa-descartada)).
 
 | VM | Tipo | IP privada (fija) | Rol |
@@ -108,13 +109,13 @@ cd infra
 Preparar cada VM (desde su PC, en la carpeta del repo):
 
 ```bash
-gcloud compute scp infra/preparar-vm.sh nodo1:~ --zone us-central1-a
+gcloud compute scp infra/preparar-vm.sh nodo1:~ --zone us-central1-c
 ./infra/gcp-create.sh ssh nodo1      # y dentro: ./preparar-vm.sh docker
 ```
 
 | VM | Comando dentro de la VM |
 |---|---|
-| nodo1 | `./preparar-vm.sh docker` |
+| nodo1 | `./preparar-vm.sh docker` (también fija el almacenamiento `overlay2`, necesario para cAdvisor) |
 | nodo2, nodo3 | `./preparar-vm.sh nodo` |
 | vm-jmeter | `./preparar-vm.sh jmeter` |
 
@@ -149,7 +150,7 @@ cd proyecto-final/jmeter
 Exportar métricas **antes de cerrar la fase** (desde su PC, con el túnel a 9090 abierto):
 ```bash
 pip install pandas requests                     # una vez
-gcloud compute scp vm-jmeter:~/proyecto-final/results/runs.csv results/ --zone us-central1-a
+gcloud compute scp vm-jmeter:~/proyecto-final/results/runs.csv results/ --zone us-central1-c
 python scripts/exportar_prometheus.py --docker --escenarios docker
 ```
 
@@ -262,7 +263,7 @@ Si con 200 usuarios el throughput sigue subiendo: `LEVELS="10 50 100 200 400" ./
 
 Desde su PC, **antes de borrar**:
 ```bash
-gcloud compute scp --recurse vm-jmeter:~/proyecto-final/results/* ./results/ --zone us-central1-a
+gcloud compute scp --recurse vm-jmeter:~/proyecto-final/results/* ./results/ --zone us-central1-c
 python scripts/exportar_prometheus.py              # con el túnel a Prometheus abierto
 git add results && git commit -m "Resultados" && git push
 ./infra/gcp-create.sh borrar                        # VMs, red y firewall
@@ -293,6 +294,7 @@ Como los datos son deterministas, los IDs siempre existen tras el seed. Para reg
 | `too many connections` | Pool × réplicas > `max_connections` | Bajar `DB_POOL_SIZE` |
 | Más réplicas y el throughput no sube | BD o JMeter saturados | CPU de PostgreSQL (Grafana) y `u*_vmstat.txt` de vm-jmeter |
 | Repeticiones muy distintas | BD sin resetear, VMs ocupadas | Revisar las reglas de la sección 5 |
+| cAdvisor no muestra `api` ni `db` (solo servicios del sistema) | Docker 29 usa el almacén de containerd, que cAdvisor no reconoce | `/etc/docker/daemon.json` con `{"features": {"containerd-snapshotter": false}}` y reiniciar Docker (ya lo hace `preparar-vm.sh docker`) |
 | `port is already allocated` en local | Puerto 8000 ocupado | `API_PORT=8088` en `.env` |
 | El crédito de Google Cloud baja rápido | VMs encendidas sin uso | `./infra/gcp-create.sh apagar` al terminar cada sesión |
 | `QUOTA_EXCEEDED` al crear VMs | Cuota de CPUs, IPs o disco SSD | `./infra/gcp-create.sh cuotas` |

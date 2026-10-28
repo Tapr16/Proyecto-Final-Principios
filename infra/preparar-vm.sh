@@ -12,6 +12,10 @@ sudo timedatectl set-timezone America/Bogota   # para cruzar tiempos con Prometh
 case "${1:-nodo}" in
   docker)
     curl -fsSL https://get.docker.com | sh
+    # Almacenamiento clásico overlay2: cAdvisor no reconoce los contenedores con el
+    # almacén de imágenes de containerd (por defecto desde Docker 29)
+    echo '{"features": {"containerd-snapshotter": false}}' | sudo tee /etc/docker/daemon.json >/dev/null
+    sudo systemctl restart docker
     sudo usermod -aG docker "$USER"
     echo ">> Cierre sesión SSH y vuelva a entrar para usar docker sin sudo"
     ;;
