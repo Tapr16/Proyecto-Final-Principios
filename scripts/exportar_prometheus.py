@@ -2,7 +2,7 @@
 
 Correr desde tu PC con el túnel abierto hacia Prometheus, por ejemplo:
     # en nodo1:  kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090
-    # en tu PC:  ssh -L 9090:localhost:9090 azureuser@<IP_PUBLICA_NODO1>
+    # en tu PC:  ./infra/gcp-create.sh ssh nodo1 -- -L 9090:localhost:9090
     python scripts/exportar_prometheus.py --escenarios k8s-1n-1r k8s-1n-2r
 
 Hay que hacerlo ANTES de borrar el clúster: después ya no existirán los datos.

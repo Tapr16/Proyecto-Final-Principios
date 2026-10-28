@@ -1,7 +1,7 @@
 # Proyecto Final — Comportamiento de una aplicación bajo diferentes escenarios de despliegue
 
 API REST de una **tienda online** (FastAPI + PostgreSQL) desplegada con Docker Compose y con Kubernetes (K3s)
-en 1, 2 y 3 nodos de Azure, probada con JMeter y monitoreada con Prometheus + Grafana.
+en 1, 2 y 3 nodos de Google Cloud, probada con JMeter y monitoreada con Prometheus + Grafana.
 
 **Integrantes:** Thomas Perez, David Suarez, Jesus Santodomingo
 
@@ -14,7 +14,7 @@ app/                 API FastAPI, seed.py (datos), Dockerfile
 docker-compose.yml   Fase 1 (Docker)
 docker-compose.monitoring.yml + monitoring/   Prometheus, Grafana, cAdvisor, node-exporter (Fase 1)
 k8s/                 Manifiestos de Kubernetes (00..06) y monitoring/ (Helm values + ServiceMonitor)
-infra/               Scripts de Azure (crear/apagar/borrar VMs) y preparación de VMs
+infra/               gcp-create.sh (Google Cloud), preparar-vm.sh y azure-create.sh (alternativa descartada)
 jmeter/              plan.jmx, ids.csv, run_scenario.sh
 scripts/             exportar_prometheus.py (métricas de cada corrida a CSV)
 results/             .jtl de cada escenario, runs.csv y results/prometheus/*.csv
@@ -24,7 +24,7 @@ docs/                reporte.pdf y bitácora
 
 ## Requisitos
 
-Docker, kubectl, K3s, Helm 3, JMeter 5.6.3, Python 3.12, Azure CLI (`az`).
+Docker, kubectl, K3s, Helm 3, JMeter 5.6.3, Python 3.12, Google Cloud CLI (`gcloud`).
 
 ---
 
@@ -66,39 +66,66 @@ Documentación interactiva de la API: http://localhost:8000/docs
 Si el puerto 8000 ya está ocupado en su PC, agreguen `API_PORT=8088` al `.env` (en las VMs déjenlo en 8000).
 Para apagar: `docker compose down` (agregar `-v` para borrar también los datos).
 
-## 2. Crear la infraestructura en Azure
+## 2. Crear la infraestructura en Google Cloud
 
-Antes de crear nada:
-1. *Suscripciones → Azure for Students → Uso + cuotas*: "Total Regional vCPUs" ≥ 8 y cuota de la familia **DASv5**.
-   Si no alcanza, pidan aumento o repartan las VMs entre cuentas del grupo.
-2. *Cost Management → Budgets*: alerta de presupuesto (p. ej. $30).
-3. Azure for Students limita las regiones. En nuestra suscripción las permitidas son brazilsouth, spaincentral,
-   switzerlandnorth, francecentral y northcentralus, y **solo `northcentralus` ofrece `Standard_D2as_v5`**
-   (el script ya la usa por defecto). Para revisar las de otra cuenta:
-   `az policy assignment list --query "[].parameters.listOfAllowedLocations.value" -o tsv`
-4. Registrar los servicios necesarios (una vez por suscripción, no cobra nada):
-   `az provider register -n Microsoft.Compute && az provider register -n Microsoft.Network && az provider register -n Microsoft.Storage`
-5. Si sale `RequestDisallowedByPolicy`, la región no está permitida: `LOC=<otra> ./azure-create.sh crear`.
-   Antes, borrar el grupo a medio crear con `./azure-create.sh borrar`.
+Se usa el **crédito de la prueba gratuita** (1.001.736 COP ≈ USD 300, vence a los 90 días) en el proyecto
+`pf-experimento-tapr16`, región `us-central1`.
+Elegimos Google Cloud porque Azure for Students no tenía cuota para el plan (ver [Anexo A](#anexo-a--azure-alternativa-descartada)).
+
+| VM | Tipo | IP privada (fija) | Rol |
+|---|---|---|---|
+| nodo1 | `n2d-standard-2` (2 vCPU AMD, 8 GB) | `10.0.1.10` | Docker (Fase 1), K3s server, PostgreSQL, monitoreo |
+| nodo2 | `n2d-standard-2` | `10.0.1.11` | K3s agent (2 nodos) |
+| nodo3 | `n2d-standard-2` | `10.0.1.12` | K3s agent (3 nodos) |
+| vm-jmeter | `n2d-standard-2` | `10.0.1.20` | JMeter |
+
+Todas iguales y **no burstable** (sin créditos de CPU), en la red privada `vpc-pf` (`10.0.1.0/24`).
+Entre las VMs se permite todo el tráfico; desde internet solo SSH. Grafana y Prometheus se ven por túnel SSH.
+
+Antes de crear nada (una vez):
+1. Instalar Google Cloud CLI (`winget install -e --id Google.CloudSDK`) e iniciar sesión: `gcloud auth login`.
+2. Proyecto activo: `gcloud config set project pf-experimento-tapr16`.
+3. Revisar cuotas: `./infra/gcp-create.sh cuotas`. Se necesitan 8 de `CPUS_ALL_REGIONS` y de `N2D_CPUS`,
+   4 de `IN_USE_ADDRESSES` y 200 GB de `SSD_TOTAL_GB` (en nuestra cuenta: 12, 16, 8 y 250).
+4. Protección contra cobros (ya configurada en el proyecto). La cuenta de facturación es **pagada**, así que si
+   el crédito se acabara Google cobraría a la tarjeta. Para evitarlo:
+   - **Presupuesto "PF experimento - gasto real"**: 5.000 COP/mes **descontando créditos** (solo cuenta lo que se
+     pagaría con la tarjeta). Avisa por correo al 50 % y al 100 %.
+   - **Apagado automático** (`infra/corte-facturacion/`, Cloud Function `corte-facturacion`): recibe los avisos
+     del presupuesto por Pub/Sub (`presupuesto-pf`) y, si el gasto real supera los 5.000 COP, **desactiva la
+     facturación del proyecto**, lo que detiene las VMs. Reacciona con unas horas de retraso (así reporta Google).
+   - Prueba segura (no corta nada): `gcloud pubsub topics publish presupuesto-pf --message='{"simulacro": true}'`
+     y ver el resultado con `gcloud functions logs read corte-facturacion --gen2 --region=us-central1`.
+   - Si se disparó y hay que seguir: revisar qué generó el gasto y reactivar con
+     `gcloud billing projects link pf-experimento-tapr16 --billing-account=018AEE-F2873D-264C97`.
 
 ```bash
 cd infra
-./azure-create.sh crear        # 4 VMs Standard_D2as_v5 + red vnet-pf
-./azure-create.sh ips          # IPs públicas y privadas
+./gcp-create.sh crear      # red + firewall + 4 VMs (unos 3 minutos)
+./gcp-create.sh ips        # IPs privadas y públicas
 ```
 
-En cada VM (`scp infra/preparar-vm.sh azureuser@<IP>:` y luego por SSH):
+Preparar cada VM (desde su PC, en la carpeta del repo):
 
-| VM | Comando |
+```bash
+gcloud compute scp infra/preparar-vm.sh nodo1:~ --zone us-central1-a
+./infra/gcp-create.sh ssh nodo1      # y dentro: ./preparar-vm.sh docker
+```
+
+| VM | Comando dentro de la VM |
 |---|---|
 | nodo1 | `./preparar-vm.sh docker` |
 | nodo2, nodo3 | `./preparar-vm.sh nodo` |
 | vm-jmeter | `./preparar-vm.sh jmeter` |
 
-En nodo1 y vm-jmeter: `git clone <repo> proyecto-final`.
+En nodo1 y vm-jmeter: `git clone https://github.com/Tapr16/proyecto-final.git`.
 
-**Costos:** al terminar cada sesión de trabajo `./azure-create.sh apagar` (apagar desde Ubuntu NO deja de cobrar).
-Al retomar: `./azure-create.sh encender`.
+La primera vez, `gcloud compute ssh` crea una llave SSH en su PC. Cada integrante que quiera entrar debe tener
+acceso al proyecto (consola → *IAM* → agregar su correo con el rol *Compute Instance Admin* o *Editor*).
+
+**Costos:** cada `n2d-standard-2` cuesta unos USD 0,08/hora (4 VMs × 60 h ≈ USD 20 del crédito).
+Al terminar cada sesión de trabajo: `./infra/gcp-create.sh apagar` (detiene CPU y RAM; el disco sigue cobrando muy poco).
+Al retomar: `./infra/gcp-create.sh encender`. Las IPs privadas no cambian; las públicas sí (no importa, `gcp-create.sh ssh` las resuelve).
 
 ## 3. Fase 1 — Docker Compose (nodo1)
 
@@ -110,19 +137,19 @@ docker compose run --rm api python seed.py      # 100K productos, ~600K items (u
 curl http://localhost:8000/health
 ```
 
-Grafana (desde su PC): `ssh -L 3000:localhost:3000 -L 9090:localhost:9090 azureuser@<IP_PUBLICA_NODO1>`
+Grafana (desde su PC): `./infra/gcp-create.sh ssh nodo1 -- -L 3000:localhost:3000 -L 9090:localhost:9090`
 → http://localhost:3000 (admin / GRAFANA_PASSWORD). Importar dashboards **1860** y **14282**.
 
 Pruebas (en vm-jmeter):
 ```bash
 cd proyecto-final/jmeter
-./run_scenario.sh docker <IP_PRIVADA_NODO1> 8000
+./run_scenario.sh docker 10.0.1.10 8000
 ```
 
 Exportar métricas **antes de cerrar la fase** (desde su PC, con el túnel a 9090 abierto):
 ```bash
 pip install pandas requests                     # una vez
-scp azureuser@<IP_PUBLICA_JMETER>:~/proyecto-final/results/runs.csv results/
+gcloud compute scp vm-jmeter:~/proyecto-final/results/runs.csv results/ --zone us-central1-a
 python scripts/exportar_prometheus.py --docker --escenarios docker
 ```
 
@@ -138,7 +165,7 @@ sudo systemctl disable --now docker docker.socket
 
 ```bash
 curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644 \
-  --node-ip <IP_PRIVADA_NODO1> --disable traefik
+  --node-ip 10.0.1.10 --disable traefik
 echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> ~/.bashrc && source ~/.bashrc
 kubectl label node nodo1 rol=db
 sudo cat /var/lib/rancher/k3s/server/node-token     # guardar para nodo2 y nodo3
@@ -160,7 +187,7 @@ Acceso:
 kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80 &
 kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090 &
 # En su PC:
-ssh -L 3000:localhost:3000 -L 9090:localhost:9090 azureuser@<IP_PUBLICA_NODO1>
+./infra/gcp-create.sh ssh nodo1 -- -L 3000:localhost:3000 -L 9090:localhost:9090
 ```
 
 Grafana (admin / la clave de `values.yaml`) ya trae dashboards de Kubernetes: *Kubernetes / Compute Resources / Namespace (Pods)*
@@ -197,7 +224,7 @@ kubectl -n proyecto get pods -o wide        # captura para el notebook
 
 En vm-jmeter:
 ```bash
-./run_scenario.sh k8s-1n-2r <IP_PRIVADA_NODO1> 30080
+./run_scenario.sh k8s-1n-2r 10.0.1.10 30080
 ```
 
 | Fase | Escenarios |
@@ -210,8 +237,8 @@ En vm-jmeter:
 
 En el nodo nuevo:
 ```bash
-curl -sfL https://get.k3s.io | K3S_URL=https://<IP_PRIVADA_NODO1>:6443 \
-  K3S_TOKEN=<token> sh -s - --node-ip <IP_PRIVADA_DEL_NODO>
+curl -sfL https://get.k3s.io | K3S_URL=https://10.0.1.10:6443 \
+  K3S_TOKEN=<token> sh -s - --node-ip <IP_DEL_NODO>    # nodo2: 10.0.1.11, nodo3: 10.0.1.12
 ```
 En nodo1:
 ```bash
@@ -235,10 +262,11 @@ Si con 200 usuarios el throughput sigue subiendo: `LEVELS="10 50 100 200 400" ./
 
 Desde su PC, **antes de borrar**:
 ```bash
-scp -r azureuser@<IP_PUBLICA_JMETER>:~/proyecto-final/results/* ./results/
+gcloud compute scp --recurse vm-jmeter:~/proyecto-final/results/* ./results/ --zone us-central1-a
 python scripts/exportar_prometheus.py              # con el túnel a Prometheus abierto
 git add results && git commit -m "Resultados" && git push
-cd infra && ./azure-create.sh borrar
+./infra/gcp-create.sh borrar                        # VMs, red y firewall
+gcloud projects delete pf-experimento-tapr16         # al final de todo: borra también el apagado automático (el presupuesto queda en la cuenta, sin costo)
 ```
 
 ## 7. Ver el notebook
@@ -266,16 +294,89 @@ Como los datos son deterministas, los IDs siempre existen tras el seed. Para reg
 | Más réplicas y el throughput no sube | BD o JMeter saturados | CPU de PostgreSQL (Grafana) y `u*_vmstat.txt` de vm-jmeter |
 | Repeticiones muy distintas | BD sin resetear, VMs ocupadas | Revisar las reglas de la sección 5 |
 | `port is already allocated` en local | Puerto 8000 ocupado | `API_PORT=8088` en `.env` |
-| El crédito de Azure baja rápido | VMs encendidas sin uso | `./azure-create.sh apagar` al terminar cada sesión |
+| El crédito de Google Cloud baja rápido | VMs encendidas sin uso | `./infra/gcp-create.sh apagar` al terminar cada sesión |
+| `QUOTA_EXCEEDED` al crear VMs | Cuota de CPUs, IPs o disco SSD | `./infra/gcp-create.sh cuotas` |
+| `gcloud compute ssh` pide permisos | El integrante no tiene acceso al proyecto | Agregarlo en *IAM* de la consola |
 
 ## Decisiones de diseño
 
 - Se prueban **1, 2 y 3 nodos** (el enunciado a veces habla solo de uno y dos; confirmado con el profesor que son 1, 2 y 3).
 
-- Todas las VMs `Standard_D2as_v5` (no serie B: sus créditos de CPU harían los resultados no comparables).
-- JMeter en una VM de la misma red, no en un portátil.
+- Todas las VMs `n2d-standard-2` en Google Cloud (equivalente a `Standard_D2as_v5` de la guía): no burstable,
+  porque los créditos de CPU harían los resultados no comparables.
+- JMeter en una VM de la misma red privada, no en un portátil.
 - PostgreSQL: una sola instancia fija en nodo1 en todas las fases; solo se escala la API.
 - `limits` iguales en Docker y K8s (API 1 CPU / 512 MB, PostgreSQL 1 CPU / 2 GB). Los `requests` de CPU en K8s
   son menores (API 250m, PostgreSQL 500m) para que las 3 réplicas quepan en un nodo de 2 vCPU.
 - 1 worker de Uvicorn por contenedor; pool de 10 + 5 conexiones por réplica (máx. 45 con 3 réplicas).
 - Datos deterministas (semilla 42). La búsqueda `ILIKE` no tiene índice a propósito (endpoint costoso).
+
+## Anexo A — Azure (alternativa descartada)
+
+Se intentó primero con Azure for Students (cuenta de Thomas, vía GitHub Student Pack). La cuota era de 6 vCPUs, 0 para la familia DASv5 y 3 IPs públicas, y Azure **rechazó el aumento**. Se deja `infra/azure-create.sh` (planes A y B) por si sirve en el futuro.
+
+
+Antes de crear nada:
+1. Revisar la cuota en `northcentralus`: `az vm list-usage -l northcentralus -o table`.
+   El plan A necesita "Total Regional vCPUs" ≥ 8, "Standard DASv5 Family vCPUs" ≥ 8 y 4 IPs públicas.
+   La cuota inicial de Azure for Students es **6 vCPUs, DASv5 = 0 y 3 IPs**: hay que pedir aumento
+   (portal → *Cuotas*) o usar el **plan B** (sección A.1).
+2. *Cost Management → Budgets*: alerta de presupuesto (p. ej. $30).
+3. Azure for Students limita las regiones. En nuestra suscripción las permitidas son brazilsouth, spaincentral,
+   switzerlandnorth, francecentral y northcentralus, y **solo `northcentralus` ofrece `Standard_D2as_v5`**
+   (el script ya la usa por defecto). Para revisar las de otra cuenta:
+   `az policy assignment list --query "[].parameters.listOfAllowedLocations.value" -o tsv`
+4. Registrar los servicios necesarios (una vez por suscripción, no cobra nada):
+   `az provider register -n Microsoft.Compute && az provider register -n Microsoft.Network && az provider register -n Microsoft.Storage`
+5. Si sale `RequestDisallowedByPolicy`, la región no está permitida: `LOC=<otra> ./azure-create.sh crear`.
+   Antes, borrar el grupo a medio crear con `./azure-create.sh borrar`.
+
+```bash
+cd infra
+./azure-create.sh crear        # 4 VMs Standard_D2as_v5 + red vnet-pf
+./azure-create.sh ips          # IPs públicas y privadas
+```
+
+En cada VM (`scp infra/preparar-vm.sh azureuser@<IP>:` y luego por SSH):
+
+| VM | Comando |
+|---|---|
+| nodo1 | `./preparar-vm.sh docker` |
+| nodo2, nodo3 | `./preparar-vm.sh nodo` |
+| vm-jmeter | `./preparar-vm.sh jmeter` |
+
+En nodo1 y vm-jmeter: `git clone <repo> proyecto-final`.
+
+**Costos:** al terminar cada sesión de trabajo `./azure-create.sh apagar` (apagar desde Ubuntu NO deja de cobrar).
+Al retomar: `./azure-create.sh encender`.
+
+### A.1 Plan B — si Azure no aprueba el aumento de cuota
+
+Con la cuota inicial de Azure for Students (6 vCPUs, solo serie B disponible, 3 IPs públicas):
+
+| VM | Cuenta | Tamaño |
+|---|---|---|
+| nodo1, nodo2, nodo3 | Thomas (`rg-pf`) | `Standard_B2as_v2` (2 vCPU, 8 GB) |
+| vm-jmeter | otro integrante (`rg-pf-jmeter`), misma región | `Standard_B2as_v2` |
+
+```bash
+# Cuenta de Thomas (az login con su cuenta)
+PLAN=B ./azure-create.sh crear
+# Cuenta de David o Jesus (az login con su cuenta; antes registrar los servicios, punto 4)
+PLAN=B ./azure-create.sh crear-jmeter
+# De vuelta en la cuenta de Thomas: abrir 8000 y 30080 de nodo1 SOLO para la IP de vm-jmeter
+./azure-create.sh abrir-jmeter <IP_PUBLICA_JMETER>
+```
+
+Diferencias con el plan A:
+- **JMeter ataca la IP pública de nodo1** (no la privada), porque está en otra suscripción:
+  `./run_scenario.sh docker <IP_PUBLICA_NODO1> 8000`. Ambas VMs están en la misma región, así que la latencia
+  sigue siendo baja; hay que mencionarlo en la metodología.
+- **Créditos de CPU (serie B):** las VMs B acumulan créditos cuando están ociosas y los gastan bajo carga;
+  si se agotan, Azure limita la CPU y los resultados dejan de ser comparables. Antes de **cada escenario**:
+  ```bash
+  ./azure-create.sh creditos      # en cada cuenta; esperar a que no estén cerca de 0
+  ```
+  Si un escenario agota los créditos (la métrica llega a 0 durante la corrida), repetirlo tras dejar las VMs
+  encendidas sin carga. Registrar los créditos en la bitácora y reportarlo como limitación del experimento.
+- Cada cuenta hace `apagar` / `encender` / `borrar` de sus propias VMs.
