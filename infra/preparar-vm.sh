@@ -4,6 +4,7 @@
 #   ./preparar-vm.sh docker   (solo nodo1: además instala Docker para la Fase 1)
 #   ./preparar-vm.sh jmeter   (vm-jmeter: Java + JMeter 5.6.3)
 set -euo pipefail
+[ "$(id -u)" -ne 0 ] || { echo "Ejecutar SIN sudo (el script usa sudo donde hace falta)"; exit 1; }
 
 sudo apt-get update && sudo apt-get upgrade -y
 sudo timedatectl set-timezone America/Bogota   # para cruzar tiempos con Prometheus

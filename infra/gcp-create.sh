@@ -14,7 +14,10 @@ set -euo pipefail
 
 PROYECTO=${PROYECTO:-$(gcloud config get-value project 2>/dev/null)}
 REGION=${REGION:-us-central1}
-ZONA=${ZONA:-us-central1-a}
+# Zona: la de nodo1 si ya existe; si no, us-central1-c (en us-central1-a hubo falta de capacidad)
+ZONA=${ZONA:-$(gcloud compute instances list --project="$PROYECTO" --filter="name=nodo1" \
+  --format="value(zone.basename())" 2>/dev/null)}
+ZONA=${ZONA:-us-central1-c}
 TIPO=${TIPO:-n2d-standard-2}   # 2 vCPU AMD EPYC, 8 GB, sin créditos de CPU (equivale a D2as_v5)
 RED=vpc-pf
 SUBRED=snet-pf
@@ -33,18 +36,22 @@ ip_privada() {   # IPs privadas fijas: no cambian al apagar/encender
 
 case "${1:-}" in
   crear)
+    # Cada paso se salta si el recurso ya existe (se puede volver a correr tras un error)
+    existe() { gcloud compute "$@" --project="$PROYECTO" --format="value(name)" >/dev/null 2>&1; }
     gcloud services enable compute.googleapis.com "${GC[@]}"
-    gcloud compute networks create $RED --subnet-mode=custom "${GC[@]}"
-    gcloud compute networks subnets create $SUBRED --network=$RED \
-      --region="$REGION" --range=$RANGO "${GC[@]}"
+    existe networks describe $RED || gcloud compute networks create $RED --subnet-mode=custom "${GC[@]}"
+    existe networks subnets describe $SUBRED --region="$REGION" || \
+      gcloud compute networks subnets create $SUBRED --network=$RED \
+        --region="$REGION" --range=$RANGO "${GC[@]}"
     # Tráfico libre entre las VMs (K3s, PostgreSQL, JMeter -> API) y solo SSH desde afuera
-    gcloud compute firewall-rules create pf-interno --network=$RED \
-      --allow=tcp,udp,icmp --source-ranges=$RANGO "${GC[@]}"
-    gcloud compute firewall-rules create pf-ssh --network=$RED \
-      --allow=tcp:22 --source-ranges=0.0.0.0/0 "${GC[@]}"
+    existe firewall-rules describe pf-interno || gcloud compute firewall-rules create pf-interno \
+      --network=$RED --allow=tcp,udp,icmp --source-ranges=$RANGO "${GC[@]}"
+    existe firewall-rules describe pf-ssh || gcloud compute firewall-rules create pf-ssh \
+      --network=$RED --allow=tcp:22 --source-ranges=0.0.0.0/0 "${GC[@]}"
     # Disco SSD pd-balanced de 50 GB: 4 × 50 GB cabe en la cuota SSD_TOTAL_GB (250 GB)
     for VM in $VMS; do
-      echo ">> creando $VM ($TIPO, $(ip_privada $VM))"
+      existe instances describe "$VM" --zone="$ZONA" && { echo ">> $VM ya existe"; continue; }
+      echo ">> creando $VM ($TIPO, $(ip_privada $VM), $ZONA)"
       gcloud compute instances create "$VM" --zone="$ZONA" \
         --machine-type="$TIPO" \
         --subnet=$SUBRED --private-network-ip="$(ip_privada $VM)" \
