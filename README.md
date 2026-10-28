@@ -5,7 +5,7 @@ en 1, 2 y 3 nodos de Google Cloud, probada con JMeter y monitoreada con Promethe
 
 **Integrantes:** Thomas Perez, David Suarez, Jesus Santodomingo
 
-**Repositorio:** https://github.com/Tapr16/proyecto-final · **Notebook:** [`notebook/analisis.ipynb`](notebook/analisis.ipynb)
+**Repositorio:** https://github.com/Tapr16/Proyecto-Final-Principios · **Notebook:** [`notebook/analisis.ipynb`](notebook/analisis.ipynb)
 
 ## Estructura
 
@@ -118,7 +118,7 @@ gcloud compute scp infra/preparar-vm.sh nodo1:~ --zone us-central1-a
 | nodo2, nodo3 | `./preparar-vm.sh nodo` |
 | vm-jmeter | `./preparar-vm.sh jmeter` |
 
-En nodo1 y vm-jmeter: `git clone https://github.com/Tapr16/proyecto-final.git`.
+En nodo1 y vm-jmeter: `git clone https://github.com/Tapr16/Proyecto-Final-Principios.git proyecto-final`.
 
 La primera vez, `gcloud compute ssh` crea una llave SSH en su PC. Cada integrante que quiera entrar debe tener
 acceso al proyecto (consola → *IAM* → agregar su correo con el rol *Compute Instance Admin* o *Editor*).
