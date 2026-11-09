@@ -116,7 +116,8 @@ Antes de crear nada (una vez):
    - Prueba segura (no corta nada): `gcloud pubsub topics publish presupuesto-pf --message='{"simulacro": true}'`
      y ver el resultado con `gcloud functions logs read corte-facturacion --gen2 --region=us-central1`.
    - Si se disparó y hay que seguir: revisar qué generó el gasto y reactivar con
-     `gcloud billing projects link pf-experimento-tapr16 --billing-account=018AEE-F2873D-264C97`.
+     `gcloud billing projects link pf-experimento-tapr16 --billing-account=<ID_CUENTA_FACTURACION>`
+     (el ID se consulta con `gcloud billing accounts list`).
 
 ```bash
 cd infra

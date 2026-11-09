@@ -141,7 +141,7 @@ RAIZ = Path(os.environ.get("PF_RAIZ", "proyecto-final" if EN_COLAB else ".."))
 RESULTS = RAIZ / "results"
 CAPTURAS = RAIZ / "docs" / "capturas"
 DESCARTADOS = RAIZ / "results_descartados"
-print("Resultados en:", RESULTS.resolve())
+print("Resultados en:", RESULTS)
 
 sns.set_theme(style="whitegrid")
 plt.rcParams["figure.dpi"] = 110
@@ -504,7 +504,7 @@ md(r"""
 Sí, pero muy lejos de lo lineal. Con 200 usuarios pasa de ~14,5 req/s (1 réplica) a ~20 (2 réplicas, speedup ≈ 1,36) y
 ~23 (3 réplicas, speedup ≈ 1,55); el ideal sería 2 y 3 (Gráfica 4). La API no es la que limita (usa < 0,11 núcleos):
 lo que cambia con más réplicas es que hay **más conexiones simultáneas a PostgreSQL** (de 15 a 30 y 45).
-**Advertencia:** ese aumento coincide con que **fallan el 70-84 % de los reportes** (sección 7.9). Cada reporte abortado
+**Advertencia:** ese aumento coincide con que **fallan el 68-85 % de los reportes** (sección 7.9). Cada reporte abortado
 es una agregación pesada que PostgreSQL no termina, y ese tiempo queda libre para las lecturas ligeras. Parte de la
 mejora es, por tanto, a costa de un endpoint degradado.
 
@@ -531,7 +531,7 @@ con tiempos de respuesta equivalentes (Gráfica 5). La diferencia está dentro d
 
 **6. ¿Agregar nodos ayuda si la BD sigue siendo una sola instancia?**
 No de forma significativa: con las mismas réplicas, pasar de 1 a 3 nodos cambia el throughput en ≤ 5 %. En la fase de
-3 nodos, nodo2 y nodo3 trabajan por debajo del 7 % de CPU: la capacidad añadida queda sin usar porque el trabajo se
+3 nodos, nodo2 y nodo3 trabajan por debajo del 5 % de CPU: la capacidad añadida queda sin usar porque el trabajo se
 acumula en la única instancia de PostgreSQL (fijada en nodo1).
 
 **7. ¿Qué endpoint se degrada más?**
@@ -555,7 +555,7 @@ md(r"""
    y parte de esa mejora se debe a que el reporte pesado empieza a fallar. Escalar la API **traslada la presión a la
    base de datos** y expone en ella nuevos límites (aquí, la memoria compartida `/dev/shm`).
 4. **Agregar nodos no mejora el rendimiento** cuando el recurso que limita no se replica: con 3 nodos, dos de ellos
-   quedaron por debajo del 7 % de CPU.
+   quedaron por debajo del 5 % de CPU.
 5. **La configuración por defecto de Kubernetes puede empeorar un sistema saturado**: las sondas con 1 s de timeout
    reiniciaban la API en plena carga y llevaban los errores de < 1 % a 69-87 %. Las sondas deben medir si el proceso está
    vivo, no si está rápido.
